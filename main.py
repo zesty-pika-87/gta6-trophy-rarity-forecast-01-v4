@@ -22,9 +22,10 @@ stretches, then a jump. Two facts shape the whole design:
    distinct state is dwarfed by the next one (N more than tripled), it is
    dropped before any fit.
 
-Per trophy the median is a damped, shrunk power law in log-time:
+Per trophy the median is a damped power law in log-time, anchored on the
+last rate:
 
-    ln(rate) = a + b * ln(1 + hours since release day began)
+    median = last_rate * exp(b_adj * (x_target - x_last))
 
 fitted by weighted least squares on the distinct states of the last 48
 hours (all of them when there are fewer), weighted by recency with a
@@ -38,9 +39,17 @@ dilution wins. Two guards keep the extrapolation honest:
 - damping: b is multiplied by 0.6. A slope fitted over hours of noisy
   refresh steps overstates how far a rate travels over days; the adoption
   curve saturates, it does not run on a straight line in log-time.
-- shrinkage: b is pulled 30% toward the mean slope across trophies. A
-  trophy with two or three noisy states does not get to keep an extreme
-  slope of its own.
+- anchoring: the median is the last rate moved by the damped slope over
+  the log-time gap since the last read, not the fit's intercept at release
+  extrapolated to the target. Damping now tempers the trend *from* the last
+  rate, and damp -> 0 is persistence, as it should be. The intercept form
+  broke the first time a fit went live: in backtest B4 the mean slope was
+  -0.777, and damping from the release intercept moved fallers up and
+  risers down (Beat Cal, slope +1.34, was forecast 10x too low).
+  Anchoring fixed B4 from 0.695 to 0.239 with the other cases unchanged.
+  No shrinkage is applied (SHRINK 0): the slope heterogeneity is real —
+  risers and grind trophies are different populations, and their mean
+  mixes the two.
 
 With fewer than three distinct states there is no slope to fit and the
 median is the last rate (persistence). The trophy at 100% (every tracked
@@ -79,9 +88,11 @@ OUTPUT_DIR = Path(os.environ.get("MAKEFUN_OUTPUT_DIR", "/output"))
 LEVELS = [0.05, 0.25, 0.5, 0.75, 0.95]
 Z = [-1.645, -0.674, 0.0, 0.674, 1.645]
 
-# Slope damping (see module docstring) and shrinkage toward the mean slope.
+# Slope damping (see module docstring). SHRINK is 0: the slope is kept as
+# fitted, not pulled toward the cross-trophy mean — risers and grind
+# trophies are genuinely different populations, and their mean mixes them.
 DAMP = 0.6
-SHRINK = 0.3
+SHRINK = 0.0
 # Spread: refresh-surprise term, in logit units. Wider when no trend could
 # be fitted at all (a flat history leaves the next refresh wholly
 # unmodelled); narrower once a fit absorbs part of the refresh dynamics.
@@ -91,12 +102,12 @@ REFRESH_SIGMA_NOFIT = 1.0
 RW_SIGMA = 0.5
 # Median shift (logit): refreshes dilute rates one-sidedly and the damped
 # trend under-predicts the decline, so the median is biased high; shift it
-# down 0.2 logit (~x0.82 in rate). Asymmetric spread: forecast errors
+# down 0.3 logit (~x0.74 in rate). Asymmetric spread: forecast errors
 # around the median are downside-heavy (dilution), so the lower quantiles
-# get 1.5x spread and the upper quantiles 0.5x.
-MEDIAN_SHIFT = -0.2
-SPREAD_DOWN = 1.5
-SPREAD_UP = 0.5
+# get 1.3x spread and the upper quantiles 0.35x.
+MEDIAN_SHIFT = -0.3
+SPREAD_DOWN = 1.3
+SPREAD_UP = 0.35
 # Only states from the last 48 hours before the checkpoint enter the fit.
 FIT_WINDOW_HOURS = 48.0
 # Drop the leading distinct state when the next one tracks >3x the players.
@@ -247,7 +258,7 @@ def forecast_case(case, name):
         else:
             a, b, resid = fit
             b_adj = DAMP * ((1 - SHRINK) * b + SHRINK * mean_slope)
-            median = math.exp(a + b_adj * x_target)
+            median = last_rate * math.exp(b_adj * (x_target - x_of(parse_time(last["at"]))))
             median = min(max(median, last_rate * MIN_MOVE), last_rate * MAX_MOVE)
             median = clamp(median)
             refresh_sigma = REFRESH_SIGMA_FIT
