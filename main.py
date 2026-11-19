@@ -68,6 +68,16 @@ fit residual (0 when there is no fit). Quantiles are the median shifted
 by z_tau * s on the logit scale, clamped to [0.01, 99.99] and rounded to 4
 decimals, non-decreasing.
 
+One more correction, applied to the median before the quantiles: refreshes
+dilute rates one-sidedly, so the median is shifted down 0.3 logit — but
+only when it is a persistence median. When a trend fit is active, the
+fitted slope already carries the dilution (it is estimated from post-drop
+states that span a refresh), so shifting again would double-count it and
+the shift is scaled to zero (FIT_SHIFT_SCALE 0.0). In backtests the fit
+is active in only one case (B4), where this changes the loss from 0.239
+to 0.134 and leaves the other six bit-identical; where the fit is
+inactive the patch is a literal no-op.
+
 Any failure of the fit for a trophy falls back to persistence with the
 same spread, so the program always writes a valid forecast.
 """
@@ -106,6 +116,12 @@ RW_SIGMA = 0.5
 # around the median are downside-heavy (dilution), so the lower quantiles
 # get 1.3x spread and the upper quantiles 0.35x.
 MEDIAN_SHIFT = -0.3
+# Fit-shift scale: the -0.3 shift corrects dilution bias for a PERSISTENCE
+# median. When a trend fit is active, the fitted slope already carries the
+# dilution (it is estimated from post-drop states spanning a refresh), so
+# applying the shift on top would double-count it — the fit branch scales
+# the shift by this factor (0.0: no shift at all while a fit is active).
+FIT_SHIFT_SCALE = 0.0
 SPREAD_DOWN = 1.3
 SPREAD_UP = 0.35
 # Only states from the last 48 hours before the checkpoint enter the fit.
@@ -250,6 +266,7 @@ def forecast_case(case, name):
         if last_rate >= 99.99:
             rows.append({"id": tid, "q": [100, 100, 100, 100, 100]})
             continue
+        shift = MEDIAN_SHIFT
         fit = fits.get(tid)
         if fit is None:
             median = last_rate
@@ -262,8 +279,9 @@ def forecast_case(case, name):
             median = min(max(median, last_rate * MIN_MOVE), last_rate * MAX_MOVE)
             median = clamp(median)
             refresh_sigma = REFRESH_SIGMA_FIT
+            shift = MEDIAN_SHIFT * FIT_SHIFT_SCALE
         spread = math.sqrt(rw * rw + refresh_sigma * refresh_sigma + min(resid, 1.0) ** 2)
-        lg = logit(median) + MEDIAN_SHIFT
+        lg = logit(median) + shift
         qs = []
         for z in Z:
             sz = spread * (SPREAD_DOWN if z < 0 else SPREAD_UP if z > 0 else 1.0)

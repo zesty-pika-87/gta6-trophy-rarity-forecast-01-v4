@@ -30,6 +30,10 @@ network dan tanpa wall clock.
   Tanpa fit yang sah, median = rate terakhir (persistence).
 - **Koreksi satu arah.** Refresh mendilusi rates: median digeser turun
   0,3 logit, spread bawah dilebarkan 1,3x, spread atas dipersempit 0,35x.
+  Geseran median hanya berlaku untuk median persistence — bila fit tren
+  aktif, slope sudah membawa dilusi (diestimasi dari state pasca-drop yang
+  mencakup refresh), jadi geseran diskalakan ke nol (FIT_SHIFT_SCALE 0,0)
+  supaya tidak double-counting.
 - **Spread logit.** Akar dari jumlah kuadrat: suku horizon
   (0,5 x akar hari), sigma refresh (0,7 bila ada fit, 1,0 bila tanpa fit),
   dan residu fit (dibatasi 1,0). Kuantil memakai z -1,645 / -0,674 / 0 /
@@ -37,7 +41,7 @@ network dan tanpa wall clock.
 - **Trofi 100%.** Bila rate terakhir >= 99,99, forecast datar
   [100, 100, 100, 100, 100].
 
-## Cek lokal (v4 — anchored + shift -0,3 + spread 1,3x/0,35x)
+## Cek lokal (v4 — anchored + shift -0,3 + spread 1,3x/0,35x + fit-shift 0)
 
 | Case | Loss |
 | --- | --- |
@@ -45,12 +49,14 @@ network dan tanpa wall clock.
 | b1 vs b1 actual (tanpa refresh) | 0,242 |
 | b2 vs b2 actual (refresh 81 mnt) | 0,358 |
 | b3 vs b2 actual (refresh 538 mnt) | 0,476 |
-| b4 vs b4 actual (tanpa refresh, fit aktif) | 0,239 |
+| b4 vs b4 actual (tanpa refresh, fit aktif) | 0,134 |
 | b5 vs b5 actual (refresh 589 mnt) | 0,476 |
 
 Kontrol: v3 (REC) 0,648 / 0,255 / 0,395 / 0,504 / 0,695 / 0,503 dan BASE
 0,918. v4 mengalahkan v3 di semua 7 case; kemenangan terbesar di B4
-(0,695 -> 0,239), satu-satunya backtest di mana fit tren aktif.
+(0,695 -> 0,134), satu-satunya backtest di mana fit tren aktif — 0,239
+dengan shift tetap diterapkan saat fit aktif, 0,134 setelah geseran
+dihapus di cabang fit (6 case lain bit-identik, fit tidak aktif di sana).
 
 ## Cara menjalankan
 
